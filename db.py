@@ -112,6 +112,17 @@ class Database:
         row = cur.fetchone()
         return row["cnt"] if row else 0
 
+    def get_all_users(self) -> list[int]:
+        """Возвращает список всех user_id, которые когда-либо зарегистрировались."""
+        cur = self.conn.cursor()
+        cur.execute("SELECT user_id FROM users")
+        return [row["user_id"] for row in cur.fetchall()]
+
+    def is_registered(self, user_id: int) -> bool:
+        cur = self.conn.cursor()
+        cur.execute("SELECT 1 FROM users WHERE user_id = ?", (user_id,))
+        return cur.fetchone() is not None
+
 
 # Создаем единый экземпляр
 db = Database()

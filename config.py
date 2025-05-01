@@ -1,7 +1,7 @@
 import os
 
 # Токен бота
-BOT_TOKEN = os.getenv('BOT_TOKEN', '7062157441:AAEOYtIaCiFJWgoyNkKS1Drjz6PAnzHUZns')
+BOT_TOKEN = os.getenv('BOT_TOKEN', '7829651867:AAFctya_MLIrKcwrmhRcJj7vN4Gi3NGFkB0')
 
 # Список администраторов (Telegram user_id)
 ADMIN_IDS = {1037664248, 0000000000}

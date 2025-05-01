@@ -8,10 +8,17 @@ from aiogram.fsm.state import State, StatesGroup
 from io import BytesIO
 from openpyxl import Workbook
 from aiogram.types import BufferedInputFile
+from aiogram.utils.keyboard import ReplyKeyboardBuilder
 
 from utils import make_options_keyboard, start_timer
 from config import BOT_TOKEN, ADMIN_IDS
 from db import db
+
+quiz_names = [
+    "Общие знания",
+    "Культура и наука",
+    "Россия",
+]
 
 # Вопросы квизов (три набора по 10 вопросов каждый)
 quiz_sets = [
@@ -73,8 +80,32 @@ class QuizState(StatesGroup):
 # Регистрация пользователя
 @dp.message(CommandStart())
 async def cmd_start(message: Message, state: FSMContext):
-    await state.set_state(Registration.first_name)
-    await message.answer("👋 Привет! Добро пожаловать в бот для квизов! Введите ваше имя:")
+    # 1) если не зарегистрирован — запускаем FSM на ввод ФИО
+    if not db.is_registered(message.from_user.id):
+        await state.set_state(Registration.first_name)
+        return await message.answer(
+            "👋 Привет! Добро пожаловать в бот для квизов! Введите ваше имя:"
+        )
+
+    # 2) иначе — показываем статус активного квиза и кнопку «Начать квиз»
+    quiz_id = db.get_active_quiz()
+    kb = ReplyKeyboardBuilder()
+    kb.button(text="Начать квиз")
+    kb.adjust(1)
+    markup = kb.as_markup(resize_keyboard=True)
+
+    if quiz_id is None:
+        text = (
+            "Когда администратор запустит квиз, вы получите уведомление с кнопкой для участия.\n"
+            "Удачи! 🍀"
+        )
+    else:
+        name = quiz_names[quiz_id - 1]
+        text = f"Сейчас активен квиз «{name}». Вы можете присоединиться к нему."
+
+    await message.answer(text, reply_markup=markup)
+
+
 
 @dp.message(Registration.first_name)
 async def process_first_name(message: Message, state: FSMContext):
@@ -88,6 +119,22 @@ async def process_last_name(message: Message, state: FSMContext):
     db.register_user(message.from_user.id, data['first_name'], message.text)
     await state.clear()
     await message.answer(f"Регистрация завершена, {data['first_name']} {message.text}!")
+    quiz_id = db.get_active_quiz()
+    kb = ReplyKeyboardBuilder()
+    kb.button(text="Начать квиз")
+    kb.adjust(1)
+    markup = kb.as_markup(resize_keyboard=True)
+
+    if quiz_id is None:
+        text = (
+            "Когда администратор запустит квиз, вы получите уведомление с кнопкой для участия.\n"
+            "Удачи! 🍀"
+        )
+        await message.answer(text, reply_markup=None)
+    else:
+        name = quiz_names[quiz_id - 1]
+        text = f"Сейчас активен квиз «{name}». Вы можете присоединиться к нему."
+        await message.answer(text, reply_markup=markup)
 
 # Команда для участников: начать квиз
 @dp.message(Command("quiz"))
@@ -100,6 +147,9 @@ async def start_quiz_user(message: Message, state: FSMContext):
         return await message.answer("Вы уже проходили этот квиз.")
     # фиксируем факт начала (для подсчёта 'начавших')
     db.record_start(message.from_user.id, quiz_id, time.time())
+    remove_kb = ReplyKeyboardBuilder().as_markup(remove_keyboard=True)
+    # отправим невидимый символ, чтобы просто убрать клавиатуру
+    await message.answer("Квиз начат. Удачи! 🍀", reply_markup=remove_kb)
     await state.update_data(
         quiz_id=quiz_id,
         current_idx=0,
@@ -112,6 +162,13 @@ async def start_quiz_user(message: Message, state: FSMContext):
 
 async def ask_question(chat_id: int, state: FSMContext):
     data = await state.get_data()
+    # удаляем прошлый вопрос (если есть)
+    last_msg = data.get("last_question_message_id")
+    if last_msg:
+        try:
+            await bot.delete_message(chat_id, last_msg)
+        except:
+            pass
     idx = data["current_idx"]
     quiz_id = data["quiz_id"]
     q = quiz_sets[quiz_id-1][idx]
@@ -131,11 +188,63 @@ async def ask_question(chat_id: int, state: FSMContext):
         reply_markup=kb,
     )
 
+    await state.update_data(last_question_message_id=msg.message_id)
+
     # стартуем задачу-таймер и сохраняем её, чтобы можно было отменить
     timer_task = asyncio.create_task(
         start_timer(bot, chat_id, msg.message_id, idx, state)
     )
     await state.update_data(timer_task=timer_task)
+
+
+async def finish_quiz(chat_id: int, state: FSMContext):
+    data = await state.get_data()
+    answers = data["answers"]
+    start = data["start_time"]
+    last_msg = data.get("last_question_message_id")
+    if last_msg:
+        try:
+            await bot.delete_message(chat_id, last_msg)
+        except:
+            pass
+    quiz_id = data["quiz_id"]
+    questions = quiz_sets[quiz_id-1]
+    total_q = len(questions)
+    answers = answers[:total_q]
+    total_time = time.time() - start
+    correct = sum(
+        1
+        for i, ua in enumerate(answers)
+        if ua == quiz_sets[data["quiz_id"] - 1][i]["answer"]
+    )
+
+    # сохраняем
+    db.save_result(chat_id, data["quiz_id"], correct, total_time)
+
+    # формируем отчет
+    report = (
+        f"🎉 Квиз завершён!\n"
+        f"✅ Правильных: {correct}/{len(answers)}\n"
+        f"⏱️ Время: {int(total_time)} сек\n\n"
+    )
+    for i, ua in enumerate(answers):
+        q = quiz_sets[data["quiz_id"] - 1][i]
+        user_answer = "–" if ua is None else q["options"][ua]
+        correct_answer = q["options"][q["answer"]]
+        report += (
+            f"{i+1}. {q['question']}\n"
+            f"   Ваш ответ: {user_answer}\n"
+            f"   Правильный: {correct_answer}\n\n"
+        )
+
+    # отправляем пользователю
+    await bot.send_message(chat_id, report)
+    # убираем клавиатуру
+    await bot.send_message(
+        chat_id,
+        "Спасибо за участие! Ждите запуска следующего квиза.",
+        reply_markup=ReplyKeyboardBuilder().as_markup(remove_keyboard=True)
+    )
 
 # Обработка ответов
 @dp.callback_query(lambda c: c.data and c.data.startswith("answer_"))
@@ -166,33 +275,45 @@ async def answer_handler(callback: CallbackQuery, state: FSMContext):
         await ask_question(callback.from_user.id, state)
     else:
         # считаем результаты
-        start = data["start_time"]
-        total_time = time.time() - start
-        correct = sum(
-            1
-            for i, user_ans in enumerate(answers)
-            if user_ans == quiz_sets[data["quiz_id"]-1][i]["answer"]
-        )
+        await finish_quiz(callback.from_user.id, state)
+#         start = data["start_time"]
+#         total_time = time.time() - start
+#         correct = sum(
+#             1
+#             for i, user_ans in enumerate(answers)
+#             if user_ans == quiz_sets[data["quiz_id"]-1][i]["answer"]
+#         )
+#
+#         # сохраняем в БД
+#         db.save_result(callback.from_user.id, data["quiz_id"], correct, total_time)
+#
+#         # формируем и отсылаем отчёт
+#         report = (
+#             f"🎉 Квиз завершён!\n"
+#             f"✅ Правильных: {correct}/{total_questions}\n"
+#             f"⏱️ Время: {int(total_time)} сек\n\n"
+#         )
+#         for i, user_ans in enumerate(answers):
+#             q = quiz_sets[data["quiz_id"]-1][i]
+#             ua = "–" if user_ans is None else q["options"][user_ans]
+#             ca = q["options"][q["answer"]]
+#             report += (
+#                 f"{i+1}. {q['question']}\n"
+#                 f"   Ваш ответ: {ua}\n"
+#                 f"   Правильный: {ca}\n\n"
+#             )
+#         await bot.send_message(callback.from_user.id, report)
+#         # сообщаем об окончании и убираем кнопки
+#         await bot.send_message(
+#             callback.from_user.id,
+#             "Спасибо за участие! Ждите запуска следующего квиза.",
+#             reply_markup=ReplyKeyboardBuilder().as_markup(remove_keyboard=True)
+#         )
 
-        # сохраняем в БД
-        db.save_result(callback.from_user.id, data["quiz_id"], correct, total_time)
-
-        # формируем и отсылаем отчёт
-        report = (
-            f"🎉 Квиз завершён!\n"
-            f"✅ Правильных: {correct}/{total_questions}\n"
-            f"⏱️ Время: {int(total_time)} сек\n\n"
-        )
-        for i, user_ans in enumerate(answers):
-            q = quiz_sets[data["quiz_id"]-1][i]
-            ua = "–" if user_ans is None else q["options"][user_ans]
-            ca = q["options"][q["answer"]]
-            report += (
-                f"{i+1}. {q['question']}\n"
-                f"   Ваш ответ: {ua}\n"
-                f"   Правильный: {ca}\n\n"
-            )
-        await bot.send_message(callback.from_user.id, report)
+@dp.message(lambda message: message.text == "Начать квиз")
+async def start_quiz_text(message: Message, state: FSMContext):
+    # просто делегируем логику существующему хендлеру
+    await start_quiz_user(message, state)
 
 # Команды администратора
 @dp.message(Command('start_quiz'))
@@ -207,6 +328,22 @@ async def cmd_start_quiz(message: Message):
         return await message.answer("Неверный номер квиза.")
     db.set_active_quiz(num)
     await message.answer(f"Активен квиз №{num}")
+    # кнопка для участников
+    kb = ReplyKeyboardBuilder()
+    kb.button(text="Начать квиз")
+    kb.adjust(1)
+    markup = kb.as_markup(resize_keyboard=True)
+    # рассылаем всем зарегистрированным
+    name = quiz_names[num - 1]
+    for uid in db.get_all_users():
+        try:
+            await bot.send_message(
+                uid,
+                f"🔔 Квиз «{name}» начат! Нажмите «Начать квиз», чтобы участвовать.",
+                reply_markup=markup
+            )
+        except:
+            pass
 
 @dp.message(Command('stop_quiz'))
 async def cmd_stop_quiz(message: Message):
