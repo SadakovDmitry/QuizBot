@@ -10,7 +10,7 @@ from openpyxl import Workbook
 from aiogram.types import BufferedInputFile
 from aiogram.utils.keyboard import ReplyKeyboardBuilder
 
-from quiz_bot2.utils import make_options_keyboard, start_timer
+from utils import make_options_keyboard, start_timer
 from config import BOT_TOKEN, ADMIN_IDS
 from db import db
 
