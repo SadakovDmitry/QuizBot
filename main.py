@@ -10,7 +10,7 @@ from openpyxl import Workbook
 from aiogram.types import BufferedInputFile
 from aiogram.utils.keyboard import ReplyKeyboardBuilder
 
-from utils import make_options_keyboard, start_timer
+from quiz_bot2.utils import make_options_keyboard, start_timer
 from config import BOT_TOKEN, ADMIN_IDS
 from db import db
 
@@ -19,7 +19,7 @@ quiz_names = [
     "Культура и наука",
     "Россия",
 ]
-
+#соси хуй
 # Вопросы квизов (три набора по 10 вопросов каждый)
 quiz_sets = [
     # Квиз №1 — Общие знания
