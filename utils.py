@@ -8,7 +8,7 @@ def make_options_keyboard(options: list[str], question_idx: int) -> InlineKeyboa
     builder = InlineKeyboardBuilder()
     for i, opt in enumerate(options):
         builder.button(text=opt, callback_data=f"answer_{question_idx}_{i}")
-    builder.adjust(2)
+    builder.adjust(1)
     return builder.as_markup()
 
 async def start_timer(
