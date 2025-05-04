@@ -26,6 +26,34 @@ quiz_sets = [
     [
         {"question": "Какие крупные внеучебные мероприятия проводятся в МФТИ?", "options": ["Спартакиада", "Матч века", "День Физика", "Все перечисленные"], "answer": 3},
         {"question": "Сколько дней обычно длятся Дни Физтеха?", "options": ["1", "2", "3", "4"], "answer": 3},
+        {"question": "Какое мероприятие традиционно завершает Дни Физтеха?", "options": ["Дискотека", "Музыкальный концерт", "Турнир", "Пенная вечеринка"], "answer": 1import time
+import asyncio
+from aiogram import Bot, Dispatcher
+from aiogram.types import Message, CallbackQuery
+from aiogram.filters import Command, CommandStart
+from aiogram.fsm.context import FSMContext
+from aiogram.fsm.state import State, StatesGroup
+from io import BytesIO
+from openpyxl import Workbook
+from aiogram.types import BufferedInputFile
+from aiogram.utils.keyboard import ReplyKeyboardBuilder
+
+from utils import make_options_keyboard, start_timer
+from config import BOT_TOKEN, ADMIN_IDS
+from db import db
+
+quiz_names = [
+    "Внеучебная деятельность в МФТИ",
+    "Кем становятся выпускники?",
+    "Как поступить на Физтех?",
+]
+
+# Вопросы квизов (три набора по 10 вопросов каждый)
+quiz_sets = [
+    # Квиз №1 — Внеучебка
+    [
+        {"question": "Какие крупные внеучебные мероприятия проводятся в МФТИ?", "options": ["Спартакиада", "Матч века", "День Физика", "Все перечисленные"], "answer": 3},
+        {"question": "Сколько дней обычно длятся Дни Физтеха?", "options": ["1", "2", "3", "4"], "answer": 3},
         {"question": "Какое мероприятие традиционно завершает Дни Физтеха?", "options": ["Дискотека", "Музыкальный концерт", "Турнир", "Пенная вечеринка"], "answer": 1},
         {"question": "Когда проводится День первокурсника в МФТИ?", "options": ["30 августа", "31 августа", "1 сентября", "2 сентября"], "answer": 2},
         {"question": "Что такое Матч века в МФТИ?", "options": ["Непрерывный 24-часовой матч", "Матч победителей турнира", "Встреча выпускников", "Обычный матч между командами"], "answer": 0},
